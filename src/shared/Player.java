@@ -1,3 +1,5 @@
+package shared;
+
 import java.awt.Color;
 import java.io.Serializable;
 
@@ -9,6 +11,7 @@ public class Player implements Serializable {
     public Color color;
     public boolean frozen;
     public long frozenUntil;
+    public long speedBoostUntil;
     public boolean hasWeapon;
     public boolean connected;
     public int lastSeqNumber;
