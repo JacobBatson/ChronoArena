@@ -23,34 +23,10 @@ public class ServerMain {
 
         int tcpPort      = Integer.parseInt(config.getProperty("server.tcp.port",  "12345"));
         int udpPort      = Integer.parseInt(config.getProperty("server.udp.port",  "12346"));
-        int gameDuration = Integer.parseInt(config.getProperty("game.duration",    "150"));
+        int gameDuration = Integer.parseInt(config.getProperty("game.duration",    "120"));
 
-        // ── Create engine ─────────────────────────────────────────────────────
+        // ── Create engine (duration overridden at Start) ──────────────────────
         GameEngine engine = new GameEngine(gameDuration);
-
-        // ── Server-side game panel ────────────────────────────────────────────
-        GamePanel serverPanel = new GamePanel("SERVER");
-
-        engine.addListener(new GameEngine.Listener() {
-            @Override
-            public void onTick(GameState state) {
-                serverPanel.updateState(state);
-            }
-            @Override
-            public void onPlayerKilled(String playerId, String reason) {}
-        });
-
-        // ── Launch server window ──────────────────────────────────────────────
-        SwingUtilities.invokeLater(() -> {
-            JFrame frame = new JFrame("ChronoArena — SERVER");
-            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
-            frame.add(serverPanel);
-            frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
-            frame.setVisible(true);
-        });
-
-        // ── Start game loop ───────────────────────────────────────────────────
-        engine.start();
 
         // ── UDP receive loop ──────────────────────────────────────────────────
         DatagramSocket udpSocket = new DatagramSocket(udpPort);
@@ -72,8 +48,6 @@ public class ServerMain {
         udpThread.setDaemon(true);
         udpThread.start();
 
-        System.out.println("[Server] Listening on TCP:" + tcpPort + " UDP:" + udpPort);
-
         // ── TCP accept loop ───────────────────────────────────────────────────
         ServerSocket serverSocket = new ServerSocket(tcpPort);
         Thread tcpThread = new Thread(() -> {
@@ -92,12 +66,6 @@ public class ServerMain {
 
                     String playerName = (String) joinMsg.data;
                     Player player = engine.addPlayer(playerName);
-                    if (player == null) {
-                        // Game full — reject
-                        clientSocket.close();
-                        System.out.println("[Server] Rejected " + playerName + " — game full.");
-                        continue;
-                    }
 
                     out.writeObject(new Message(Message.Type.JOIN_ACK, player.playerId));
                     out.flush();
@@ -114,6 +82,48 @@ public class ServerMain {
         }, "TCP-Acceptor");
         tcpThread.setDaemon(true);
         tcpThread.start();
+
+        System.out.println("[Server] Listening on TCP:" + tcpPort + " UDP:" + udpPort);
+
+        // ── Start game loop (paused until operator clicks Start) ──────────────
+        engine.start();
+
+        // ── Build the window ──────────────────────────────────────────────────
+        JFrame[]     frameRef  = new JFrame[1];
+        LobbyPanel[] lobbyRef  = new LobbyPanel[1];
+
+        lobbyRef[0] = new LobbyPanel(() -> {
+            // Called on EDT when operator clicks "Start Game"
+            int seconds = lobbyRef[0].getDurationSeconds();
+            engine.setDuration(seconds);
+            engine.startGame();
+
+            // Swap lobby panel for the live game panel
+            GamePanel serverPanel = new GamePanel("SERVER");
+            engine.addListener(new GameEngine.Listener() {
+                @Override
+                public void onTick(GameState state) { serverPanel.updateState(state); }
+                @Override
+                public void onPlayerKilled(String playerId, String reason) {}
+            });
+
+            JFrame frame = frameRef[0];
+            frame.getContentPane().removeAll();
+            frame.getContentPane().add(serverPanel);
+            frame.revalidate();
+            frame.repaint();
+        });
+
+        engine.addListener(lobbyRef[0]);
+
+        SwingUtilities.invokeLater(() -> {
+            JFrame frame = new JFrame("ChronoArena — SERVER");
+            frameRef[0] = frame;
+            frame.setDefaultCloseOperation(JFrame.EXIT_ON_CLOSE);
+            frame.add(lobbyRef[0]);
+            frame.setExtendedState(JFrame.MAXIMIZED_BOTH);
+            frame.setVisible(true);
+        });
 
         // ── Admin stdin: "kill <playerId> [reason]" ───────────────────────────
         Scanner scanner = new Scanner(System.in);

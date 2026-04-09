@@ -11,6 +11,7 @@ public class GameState implements Serializable {
     public int timeRemaining;
     public int currentTick;
     public boolean gameOver;
+    public boolean gameStarted;
     public String winnerId;
 
     public GameState(int gameDuration) {
