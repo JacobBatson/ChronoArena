@@ -91,7 +91,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
         // Movement input loop
         new Timer(100, e -> {
-            if (gameState != null && !gameState.gameOver) processHeldKeys();
+            if (gameState != null && !gameState.gameOver && gameState.gameStarted) processHeldKeys();
         }).start();
 
         // Floating text animation loop (~30fps)
@@ -182,11 +182,14 @@ public class GamePanel extends JPanel implements KeyListener {
         int k = e.getKeyCode();
         if (k < keys.length) keys[k] = true;
 
-        if (k == KeyEvent.VK_SPACE) {
-            long now = System.currentTimeMillis();
-            if (now - lastFiredTime >= COOLDOWN_MS) {
-                lastFiredTime = now;
-                sendUDP(new PlayerAction(myPlayerId, ActionType.USE_ITEM, 0, 0, seqNumber++));
+        if (k == KeyEvent.VK_SPACE && gameState != null && gameState.gameStarted) {
+            Player me = findPlayer(myPlayerId);
+            if (me != null && me.hasWeapon) {
+                long now = System.currentTimeMillis();
+                if (now - lastFiredTime >= COOLDOWN_MS) {
+                    lastFiredTime = now;
+                    sendUDP(new PlayerAction(myPlayerId, ActionType.USE_ITEM, 0, 0, seqNumber++));
+                }
             }
         }
     }
@@ -221,6 +224,7 @@ public class GamePanel extends JPanel implements KeyListener {
         g2.scale(scale, scale);
 
         if (gameState == null) { drawWaiting(g2); return; }
+        if (!gameState.gameStarted) { drawLobby(g2); return; }
 
         drawHUD(g2);
         drawArena(g2);
@@ -238,6 +242,67 @@ public class GamePanel extends JPanel implements KeyListener {
         String msg = "Connecting to server...";
         FontMetrics fm = g.getFontMetrics();
         g.drawString(msg, (W - fm.stringWidth(msg)) / 2, H / 2);
+    }
+
+    // ── Lobby screen ──────────────────────────────────────────────────────────
+    private void drawLobby(Graphics2D g) {
+        g.setColor(BG);
+        g.fillRect(0, 0, W, H);
+
+        // Title
+        g.setFont(new Font("Monospaced", Font.BOLD, 36));
+        g.setColor(new Color(200, 180, 255));
+        String title = "CHRONOARENA";
+        FontMetrics fm = g.getFontMetrics();
+        g.drawString(title, (W - fm.stringWidth(title)) / 2, H / 2 - 120);
+
+        // Subtitle
+        g.setFont(new Font("Monospaced", Font.BOLD, 20));
+        g.setColor(new Color(160, 160, 200));
+        String sub = "Waiting for host to start the game...";
+        fm = g.getFontMetrics();
+        g.drawString(sub, (W - fm.stringWidth(sub)) / 2, H / 2 - 72);
+
+        // Separator
+        g.setColor(new Color(60, 60, 90));
+        g.fillRect(W / 4, H / 2 - 52, W / 2, 2);
+
+        // "Connected Players" heading
+        g.setFont(new Font("Monospaced", Font.BOLD, 16));
+        g.setColor(new Color(130, 130, 170));
+        String heading = "Connected Players";
+        fm = g.getFontMetrics();
+        g.drawString(heading, (W - fm.stringWidth(heading)) / 2, H / 2 - 28);
+
+        // Player rows
+        int rowH = 38;
+        int startY = H / 2;
+        for (int i = 0; i < gameState.players.size(); i++) {
+            Player p = gameState.players.get(i);
+            int rowY = startY + i * rowH;
+            int dotX = W / 2 - 130;
+
+            g.setColor(p.color);
+            g.fillOval(dotX, rowY - 14, 16, 16);
+            if (p.playerId.equals(myPlayerId)) {
+                g.setColor(Color.WHITE);
+                g.setStroke(new BasicStroke(2f));
+                g.drawOval(dotX - 2, rowY - 16, 20, 20);
+                g.setStroke(new BasicStroke(1f));
+            }
+
+            g.setFont(new Font("Monospaced", Font.BOLD, 16));
+            g.setColor(p.playerId.equals(myPlayerId) ? Color.WHITE : new Color(200, 200, 220));
+            String label = p.name + (p.playerId.equals(myPlayerId) ? "  (you)" : "");
+            g.drawString(label, dotX + 26, rowY);
+        }
+
+        // Bottom hint
+        g.setFont(new Font("Monospaced", Font.PLAIN, 13));
+        g.setColor(new Color(90, 90, 120));
+        String hint = "The game will begin when the host clicks Start Game";
+        fm = g.getFontMetrics();
+        g.drawString(hint, (W - fm.stringWidth(hint)) / 2, H - 60);
     }
 
     // ── HUD ───────────────────────────────────────────────────────────────────
@@ -303,7 +368,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
         for (Zone z : gameState.zones)  drawZone(g, z, oy);
         for (Item item : gameState.items) { if (!item.collected) drawItem(g, item, oy); }
-        for (Player p : gameState.players) drawPlayer(g, p, oy);
+        for (Player p : gameState.players) if (p.connected) drawPlayer(g, p, oy);
 
         // Player info panel (top-left of arena)
         drawPlayerInfoPanel(g, oy);

@@ -40,15 +40,9 @@ public class GameEngine {
     private static final int    ZONE_POINTS_INTERVAL    = 10;    // ticks → 1 s
     private static final int    ITEM_SPAWN_INTERVAL     = 30;    // ticks → 3 s
     private static final int    MAX_ITEMS               = 5;
-    private static final int    MAX_PLAYERS             = 4;
 
-    /** Starting grid positions for each player slot (top-left, top-right, bot-left, bot-right). */
-    private static final int[][] START_POS = {
-        {1, 1}, {18, 1}, {1, 13}, {18, 13}
-    };
-
-    /** Player colours – must match the demo colours in ClientMain. */
-    private static final Color[] PLAYER_COLORS = {
+    /** Fixed colours for the first 4 players. */
+    private static final Color[] BASE_COLORS = {
         new Color(80,  130, 255),   // blue
         new Color(255, 80,  80),    // red
         new Color(80,  200, 80),    // green
@@ -64,9 +58,10 @@ public class GameEngine {
     /** Server-side only: tracks which player is currently capturing each zone. */
     private final Map<String, String> zoneCapturer = new HashMap<>();
 
-    private int     playerIdCounter = 1;
-    private int     itemIdCounter   = 1;
-    private boolean running         = false;
+    private int              playerIdCounter = 1;
+    private int              itemIdCounter   = 1;
+    private boolean          running         = false;
+    private volatile boolean gameStarted     = false;
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public GameEngine(int gameDurationSeconds) {
@@ -74,11 +69,39 @@ public class GameEngine {
         initZones();
     }
 
-    /** Create the three fixed control zones (positions match the demo). */
+    /** Place three zones at random non-overlapping positions. */
     private void initZones() {
-        gameState.zones.add(new Zone("A", 3,  2,  3, 3));
-        gameState.zones.add(new Zone("B", 9,  6,  3, 3));
-        gameState.zones.add(new Zone("C", 15, 10, 3, 3));
+        String[] ids = {"A", "B", "C"};
+        for (String id : ids) {
+            int[] pos = randomZonePosition();
+            gameState.zones.add(new Zone(id, pos[0], pos[1], 3, 3));
+        }
+    }
+
+    /**
+     * Picks a random top-left corner for a 3×3 zone that doesn't overlap
+     * (with a 1-cell buffer) any zone already in gameState.zones.
+     */
+    private int[] randomZonePosition() {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            int x = 1 + random.nextInt(COLS - 4); // [1, COLS-4]
+            int y = 1 + random.nextInt(ROWS - 4); // [1, ROWS-4]
+            if (!overlapsExistingZone(x, y)) return new int[]{x, y};
+        }
+        // Fallback: evenly spaced columns, middle row
+        int idx = gameState.zones.size();
+        return new int[]{2 + idx * 6, ROWS / 2 - 1};
+    }
+
+    /** Returns true if a 3×3 zone at (x,y) overlaps any existing zone (with 1-cell buffer). */
+    private boolean overlapsExistingZone(int x, int y) {
+        for (Zone z : gameState.zones) {
+            if (x < z.x + z.width  + 1 && x + 3 + 1 > z.x &&
+                y < z.y + z.height + 1 && y + 3 + 1 > z.y) {
+                return true;
+            }
+        }
+        return false;
     }
 
     // ── Public API ────────────────────────────────────────────────────────────
@@ -94,22 +117,38 @@ public class GameEngine {
     /**
      * Adds a new player to the game.
      * Called by ClientHandler when a JOIN message arrives over TCP.
-     * Returns null if the game is full.
      */
     public synchronized Player addPlayer(String name) {
-        // Count currently connected players
-        long connected = gameState.players.stream().filter(p -> p.connected).count();
-        if (connected >= MAX_PLAYERS) return null;
-
-        int slot = gameState.players.size(); // 0-based slot
-        int[] pos   = START_POS [Math.min(slot, START_POS.length - 1)];
-        Color color = PLAYER_COLORS[Math.min(slot, PLAYER_COLORS.length - 1)];
+        int slot  = gameState.players.size();
+        int[] pos = spawnPosition();
+        Color color = slot < BASE_COLORS.length
+                ? BASE_COLORS[slot]
+                : Color.getHSBColor(slot / 8f, 0.75f, 1f);
 
         String id = "p" + playerIdCounter++;
         Player p  = new Player(id, name, pos[0], pos[1], color);
         gameState.players.add(p);
         System.out.println("[Engine] Player joined: " + name + " (" + id + ")");
         return p;
+    }
+
+    /** Returns a random spawn position that is not inside a zone and not occupied. */
+    private int[] spawnPosition() {
+        for (int attempt = 0; attempt < 200; attempt++) {
+            int x = random.nextInt(COLS);
+            int y = random.nextInt(ROWS);
+            if (!isCellOccupiedByPlayer(x, y) && !isCellInAnyZone(x, y)) return new int[]{x, y};
+        }
+        // Fallback: place anywhere not occupied
+        return new int[]{random.nextInt(COLS), random.nextInt(ROWS)};
+    }
+
+    /** Returns true if (x,y) falls inside any zone's rectangle. */
+    private boolean isCellInAnyZone(int x, int y) {
+        for (Zone z : gameState.zones) {
+            if (x >= z.x && x < z.x + z.width && y >= z.y && y < z.y + z.height) return true;
+        }
+        return false;
     }
 
     /**
@@ -156,6 +195,17 @@ public class GameEngine {
     /** Stops the game loop cleanly. */
     public void stop() {
         running = false;
+    }
+
+    /** Unpauses the game — timer and scoring begin. Call when the operator clicks Start. */
+    public void startGame() {
+        gameStarted = true;
+        System.out.println("[Engine] Game started.");
+    }
+
+    /** Updates the game duration. Safe to call before startGame(). */
+    public void setDuration(int seconds) {
+        gameState.timeRemaining = seconds;
     }
 
     // ── Game Loop ─────────────────────────────────────────────────────────────
@@ -207,8 +257,8 @@ public class GameEngine {
         // 6. Frozen / speed-boost timers
         updateTimers();
 
-        // 7. Every 10 ticks (1 second): zone points + timer countdown
-        if (gameState.currentTick % ZONE_POINTS_INTERVAL == 0 && gameState.currentTick > 0) {
+        // 7. Every 10 ticks (1 second): zone points + timer countdown (only after game started)
+        if (gameStarted && gameState.currentTick % ZONE_POINTS_INTERVAL == 0 && gameState.currentTick > 0) {
             awardZonePoints();
             decrementTimer();
         }
@@ -221,8 +271,11 @@ public class GameEngine {
         // 9. Advance tick counter
         gameState.currentTick++;
 
-        // 10. Check game over
-        checkGameOver();
+        // 10. Check game over (only after game started)
+        if (gameStarted) checkGameOver();
+
+        // Propagate lobby/started state to clients
+        gameState.gameStarted = gameStarted;
 
         // 11. Notify all listeners (ClientHandlers broadcast to clients)
         for (Listener l : listeners) l.onTick(gameState);
@@ -276,11 +329,11 @@ public class GameEngine {
             }
         }
 
+        attacker.hasWeapon = false;
         if (target != null) {
             target.frozen      = true;
             target.frozenUntil = System.currentTimeMillis() + FREEZE_DURATION_MS;
             target.score       = Math.max(0, target.score - FREEZE_PENALTY);
-            attacker.hasWeapon = false;
             System.out.println("[Engine] " + attacker.name + " froze " + target.name);
         }
     }
@@ -455,6 +508,21 @@ public class GameEngine {
     // ── Game Over ─────────────────────────────────────────────────────────────
 
     private void checkGameOver() {
+        // End immediately if no players remain connected
+        if (!gameState.players.isEmpty()) {
+            boolean anyConnected = false;
+            for (Player p : gameState.players) {
+                if (p.connected) { anyConnected = true; break; }
+            }
+            if (!anyConnected) {
+                gameState.gameOver = true;
+                running = false;
+                gameState.winnerId = null;
+                System.out.println("[Engine] Game over — no players remaining.");
+                return;
+            }
+        }
+
         if (gameState.timeRemaining > 0) return;
 
         gameState.gameOver = true;
