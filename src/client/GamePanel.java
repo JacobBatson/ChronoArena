@@ -83,11 +83,6 @@ public class GamePanel extends JPanel implements KeyListener {
         init();
     }
 
-    public GamePanel(String myPlayerId) {
-        this.myPlayerId = myPlayerId;
-        init();
-    }
-
     private void init() {
         setPreferredSize(Toolkit.getDefaultToolkit().getScreenSize());
         setBackground(BG);
