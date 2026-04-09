@@ -76,7 +76,7 @@ public class LobbyPanel extends JPanel implements GameEngine.Listener {
         add(durationRow, c);
 
         // ── Player list ───────────────────────────────────────────────────────
-        playerCountLabel = new JLabel("Connected Players (0 / 4):", SwingConstants.LEFT);
+        playerCountLabel = new JLabel("Connected Players (0):", SwingConstants.LEFT);
         playerCountLabel.setForeground(new Color(200, 200, 220));
         playerCountLabel.setFont(new Font("SansSerif", Font.BOLD, 15));
         c.gridy = 4;
@@ -130,7 +130,7 @@ public class LobbyPanel extends JPanel implements GameEngine.Listener {
         SwingUtilities.invokeLater(() -> {
             playerListModel.clear();
             for (String name : names) playerListModel.addElement(name);
-            playerCountLabel.setText("Connected Players (" + names.size() + " / 4):");
+            playerCountLabel.setText("Connected Players (" + names.size() + "):");
             startButton.setEnabled(!names.isEmpty());
         });
     }
