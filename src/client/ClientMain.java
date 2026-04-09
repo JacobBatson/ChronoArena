@@ -101,7 +101,6 @@ public class ClientMain {
         // Players
         Player me = new Player(myId, playerName, 2, 2, new Color(80, 130, 255));
         me.score = 120;
-        me.hasWeapon = true;
         state.players.add(me);
 
         Player p2 = new Player("p2", "Ben", 10, 7, new Color(255, 80, 80));

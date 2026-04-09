@@ -329,11 +329,11 @@ public class GameEngine {
             }
         }
 
+        attacker.hasWeapon = false;
         if (target != null) {
             target.frozen      = true;
             target.frozenUntil = System.currentTimeMillis() + FREEZE_DURATION_MS;
             target.score       = Math.max(0, target.score - FREEZE_PENALTY);
-            attacker.hasWeapon = false;
             System.out.println("[Engine] " + attacker.name + " froze " + target.name);
         }
     }
@@ -508,6 +508,21 @@ public class GameEngine {
     // ── Game Over ─────────────────────────────────────────────────────────────
 
     private void checkGameOver() {
+        // End immediately if no players remain connected
+        if (!gameState.players.isEmpty()) {
+            boolean anyConnected = false;
+            for (Player p : gameState.players) {
+                if (p.connected) { anyConnected = true; break; }
+            }
+            if (!anyConnected) {
+                gameState.gameOver = true;
+                running = false;
+                gameState.winnerId = null;
+                System.out.println("[Engine] Game over — no players remaining.");
+                return;
+            }
+        }
+
         if (gameState.timeRemaining > 0) return;
 
         gameState.gameOver = true;

@@ -188,10 +188,13 @@ public class GamePanel extends JPanel implements KeyListener {
         if (k < keys.length) keys[k] = true;
 
         if (k == KeyEvent.VK_SPACE && gameState != null && gameState.gameStarted) {
-            long now = System.currentTimeMillis();
-            if (now - lastFiredTime >= COOLDOWN_MS) {
-                lastFiredTime = now;
-                sendUDP(new PlayerAction(myPlayerId, ActionType.USE_ITEM, 0, 0, seqNumber++));
+            Player me = findPlayer(myPlayerId);
+            if (me != null && me.hasWeapon) {
+                long now = System.currentTimeMillis();
+                if (now - lastFiredTime >= COOLDOWN_MS) {
+                    lastFiredTime = now;
+                    sendUDP(new PlayerAction(myPlayerId, ActionType.USE_ITEM, 0, 0, seqNumber++));
+                }
             }
         }
     }
@@ -370,7 +373,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
         for (Zone z : gameState.zones)  drawZone(g, z, oy);
         for (Item item : gameState.items) { if (!item.collected) drawItem(g, item, oy); }
-        for (Player p : gameState.players) drawPlayer(g, p, oy);
+        for (Player p : gameState.players) if (p.connected) drawPlayer(g, p, oy);
 
         // Player info panel (top-left of arena)
         drawPlayerInfoPanel(g, oy);
