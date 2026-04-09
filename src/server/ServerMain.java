@@ -29,7 +29,7 @@ public class ServerMain {
         GameEngine engine = new GameEngine(gameDuration);
 
         // ── Server-side game panel ────────────────────────────────────────────
-        GamePanel serverPanel = new GamePanel("SERVER");
+        GamePanel serverPanel = new GamePanel("SERVER", null, null, null, 0);
 
         engine.addListener(new GameEngine.Listener() {
             @Override
