@@ -1,0 +1,8 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(javac:*)",
+      "Bash(echo \"Exit: $?\")"
+    ]
+  }
+}

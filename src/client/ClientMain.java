@@ -21,9 +21,16 @@ public class ClientMain {
             System.out.println("config.properties not found — using defaults");
         }
 
-        String serverIp = config.getProperty("server.ip",       "localhost");
         int tcpPort     = Integer.parseInt(config.getProperty("server.tcp.port", "12345"));
         int udpPort     = Integer.parseInt(config.getProperty("server.udp.port", "12346"));
+
+        // ── Ask server IP ─────────────────────────────────────────────────────
+        String defaultIp = config.getProperty("server.ip", "localhost");
+        String serverIp = JOptionPane.showInputDialog(null,
+                "Enter server IP address:", defaultIp);
+        if (serverIp == null) System.exit(0);
+        if (serverIp.trim().isEmpty()) serverIp = defaultIp;
+        else serverIp = serverIp.trim();
 
         // ── Ask player name ───────────────────────────────────────────────────
         String playerName = JOptionPane.showInputDialog(null,
