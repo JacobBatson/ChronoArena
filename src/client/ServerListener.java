@@ -1,6 +1,7 @@
 package client;
 
 import shared.*;
+import shared.ChatMessage;
 
 import javax.swing.*;
 import java.io.*;
@@ -13,8 +14,8 @@ public class ServerListener implements Runnable {
     private final Socket socket;
 
     public ServerListener(ObjectInputStream in, GamePanel panel, Socket socket) {
-        this.in     = in;
-        this.panel  = panel;
+        this.in = in;
+        this.panel = panel;
         this.socket = socket;
     }
 
@@ -32,6 +33,12 @@ public class ServerListener implements Runnable {
                                 "You were kicked by the server:\n" + msg.data,
                                 "Disconnected", JOptionPane.WARNING_MESSAGE);
                         System.exit(0);
+                        break;
+                    case CHAT:
+                        panel.receiveChat((ChatMessage) msg.data, false);
+                        break;
+                    case WHISPER:
+                        panel.receiveChat((ChatMessage) msg.data, true);
                         break;
                     default:
                         break;

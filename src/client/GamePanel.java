@@ -10,26 +10,25 @@ import java.net.*;
 import java.util.*;
 import java.util.List;
 import javax.swing.Timer;
-import java.awt.Toolkit;
 
 public class GamePanel extends JPanel implements KeyListener {
 
     // ── Grid / layout constants ──────────────────────────────────────────────
-    public static final int CELL     = 40;
-    public static final int COLS     = 20;
-    public static final int ROWS     = 15;
-    public static final int HUD_H    = 90;
+    public static final int CELL = 40;
+    public static final int COLS = 20;
+    public static final int ROWS = 15;
+    public static final int HUD_H = 90;
     public static final int STATUS_H = 50;
 
     private static final int W = COLS * CELL;
     private static final int H = HUD_H + ROWS * CELL + STATUS_H;
 
     // ── Colors ────────────────────────────────────────────────────────────────
-    private static final Color BG          = new Color(30, 30, 40);
-    private static final Color GRID_LINE   = new Color(50, 50, 65);
-    private static final Color HUD_BG      = new Color(15, 15, 25);
-    private static final Color STATUS_BG   = new Color(15, 15, 25);
-    private static final Color ZONE_UNCL   = new Color(70, 70, 90, 80);
+    private static final Color BG = new Color(30, 30, 40);
+    private static final Color GRID_LINE = new Color(50, 50, 65);
+    private static final Color HUD_BG = new Color(15, 15, 25);
+    private static final Color STATUS_BG = new Color(15, 15, 25);
+    private static final Color ZONE_UNCL = new Color(70, 70, 90, 80);
     private static final Color ZONE_BORDER = new Color(110, 110, 140);
 
     // ── Cooldown ──────────────────────────────────────────────────────────────
@@ -39,24 +38,31 @@ public class GamePanel extends JPanel implements KeyListener {
     // ── Floating text ─────────────────────────────────────────────────────────
     private static class FloatingText {
         String text;
-        float x, y;       // pixel position in arena
+        float x, y; // pixel position in arena
         Color color;
         float alpha = 1f;
-        float life  = 1.5f; // seconds to live
+        float life = 1.5f; // seconds to live
 
         FloatingText(String text, int gridX, int gridY, Color color) {
-            this.text  = text;
-            this.x     = gridX * CELL + CELL / 2f;
-            this.y     = HUD_H + gridY * CELL + CELL / 2f;
+            this.text = text;
+            this.x = gridX * CELL + CELL / 2f;
+            this.y = HUD_H + gridY * CELL + CELL / 2f;
             this.color = color;
         }
     }
+
     private final List<FloatingText> floatingTexts = new ArrayList<>();
 
     // ── State ─────────────────────────────────────────────────────────────────
     private volatile GameState gameState;
     private GameState prevState;
     private final String myPlayerId;
+
+    // ── Freeze ray beam ───────────────────────────────────────────────────────
+    private int beamFromX = -1, beamFromY = -1;
+    private int beamToX = -1, beamToY = -1;
+    private long beamUntil = 0;
+    private static final long BEAM_MS = 400; // how long the beam stays visible
 
     // ── Networking ────────────────────────────────────────────────────────────
     private ObjectOutputStream tcpOut;
@@ -69,17 +75,40 @@ public class GamePanel extends JPanel implements KeyListener {
     private final boolean[] keys = new boolean[512];
     private boolean gameOverShown = false;
 
+    // ── TCP send queue ────────────────────────────────────────────────────────
+    private final java.util.concurrent.BlockingQueue<Message> tcpSendQueue = new java.util.concurrent.LinkedBlockingQueue<>();
+
+    // ── Chat ──────────────────────────────────────────────────────────────────
+    private static final int CHAT_MAX = 50; // history cap
+    private static final long CHAT_FADE_MS = 6000; // ms before a line fades
+    private static final int CHAT_SHOW = 8; // lines visible in HUD
+
+    private static class ChatLine {
+        String display; // e.g. "[Global] Alice: hello"
+        Color color;
+        boolean whisper;
+        long arrivedAt = System.currentTimeMillis();
+    }
+
+    private final java.util.ArrayDeque<ChatLine> chatHistory = new java.util.ArrayDeque<>();
+
+    // Chat input state
+    private boolean chatOpen = false; // is the input box visible?
+    private boolean whisperMode = false;
+    private String whisperTarget = ""; // playerId being whispered
+    private final StringBuilder chatInput = new StringBuilder();
+
     // ─────────────────────────────────────────────────────────────────────────
     // Constructors
     // ─────────────────────────────────────────────────────────────────────────
 
     public GamePanel(String myPlayerId, ObjectOutputStream tcpOut,
-                     DatagramSocket udpSocket, InetAddress serverAddr, int udpPort) {
-        this.myPlayerId  = myPlayerId;
-        this.tcpOut      = tcpOut;
-        this.udpSocket   = udpSocket;
-        this.serverAddr  = serverAddr;
-        this.udpPort     = udpPort;
+            DatagramSocket udpSocket, InetAddress serverAddr, int udpPort) {
+        this.myPlayerId = myPlayerId;
+        this.tcpOut = tcpOut;
+        this.udpSocket = udpSocket;
+        this.serverAddr = serverAddr;
+        this.udpPort = udpPort;
         init();
     }
 
@@ -91,7 +120,8 @@ public class GamePanel extends JPanel implements KeyListener {
 
         // Movement input loop
         new Timer(100, e -> {
-            if (gameState != null && !gameState.gameOver && gameState.gameStarted) processHeldKeys();
+            if (gameState != null && !gameState.gameOver && gameState.gameStarted)
+                processHeldKeys();
         }).start();
 
         // Floating text animation loop (~30fps)
@@ -101,15 +131,38 @@ public class GamePanel extends JPanel implements KeyListener {
                 Iterator<FloatingText> it = floatingTexts.iterator();
                 while (it.hasNext()) {
                     FloatingText ft = it.next();
-                    ft.y    -= 0.8f;           // float upward
+                    ft.y -= 0.8f; // float upward
                     ft.life -= 0.033f;
                     ft.alpha = Math.max(0, ft.life / 1.5f);
-                    if (ft.life <= 0) it.remove();
+                    if (ft.life <= 0)
+                        it.remove();
                     any = true;
                 }
             }
-            if (any) repaint();
+            if (any)
+                repaint();
         }).start();
+        // TCP send thread — keeps chat off the game loop thread
+        Thread tcpSender = new Thread(() -> {
+            while (true) {
+                try {
+                    Message msg = tcpSendQueue.take();
+                    synchronized (tcpOut) {
+                        tcpOut.writeObject(msg);
+                        tcpOut.flush();
+                        tcpOut.reset();
+                    }
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                } catch (IOException e) {
+                    System.err.println("TCP send error: " + e.getMessage());
+                    break;
+                }
+            }
+        }, "TCP-Sender");
+        tcpSender.setDaemon(true);
+        tcpSender.start();
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -117,7 +170,7 @@ public class GamePanel extends JPanel implements KeyListener {
     // ─────────────────────────────────────────────────────────────────────────
 
     public void updateState(GameState state) {
-        detectEvents(state);   // check for freeze events before swapping state
+        detectEvents(state); // check for freeze events before swapping state
         this.gameState = state;
         SwingUtilities.invokeLater(this::repaint);
         if (state.gameOver && !gameOverShown) {
@@ -153,10 +206,14 @@ public class GamePanel extends JPanel implements KeyListener {
     // ─────────────────────────────────────────────────────────────────────────
 
     private void processHeldKeys() {
-        if      (keys[KeyEvent.VK_LEFT]  || keys[KeyEvent.VK_A]) sendMove(-1,  0);
-        else if (keys[KeyEvent.VK_RIGHT] || keys[KeyEvent.VK_D]) sendMove( 1,  0);
-        else if (keys[KeyEvent.VK_UP]    || keys[KeyEvent.VK_W]) sendMove( 0, -1);
-        else if (keys[KeyEvent.VK_DOWN]  || keys[KeyEvent.VK_S]) sendMove( 0,  1);
+        if (keys[KeyEvent.VK_LEFT] || keys[KeyEvent.VK_A])
+            sendMove(-1, 0);
+        else if (keys[KeyEvent.VK_RIGHT] || keys[KeyEvent.VK_D])
+            sendMove(1, 0);
+        else if (keys[KeyEvent.VK_UP] || keys[KeyEvent.VK_W])
+            sendMove(0, -1);
+        else if (keys[KeyEvent.VK_DOWN] || keys[KeyEvent.VK_S])
+            sendMove(0, 1);
     }
 
     private void sendMove(int dx, int dy) {
@@ -164,7 +221,8 @@ public class GamePanel extends JPanel implements KeyListener {
     }
 
     private void sendUDP(PlayerAction action) {
-        if (udpSocket == null || serverAddr == null) return;
+        if (udpSocket == null || serverAddr == null)
+            return;
         try {
             ByteArrayOutputStream baos = new ByteArrayOutputStream();
             ObjectOutputStream oos = new ObjectOutputStream(baos);
@@ -180,7 +238,25 @@ public class GamePanel extends JPanel implements KeyListener {
     @Override
     public void keyPressed(KeyEvent e) {
         int k = e.getKeyCode();
-        if (k < keys.length) keys[k] = true;
+        if (k < keys.length)
+            keys[k] = true;
+
+        // ── Chat input routing ────────────────────────────────────────────────────
+        if (chatOpen) {
+            handleChatKey(e);
+            return; // don't pass keypresses to movement while typing
+        }
+
+        // Open global chat
+        if (k == KeyEvent.VK_T) {
+            openChat(false, null);
+            return;
+        }
+        // Open whisper — /w or just press Y then type playerId:message
+        if (k == KeyEvent.VK_Y) {
+            openChat(true, null);
+            return;
+        }
 
         if (k == KeyEvent.VK_SPACE && gameState != null && gameState.gameStarted) {
             Player me = findPlayer(myPlayerId);
@@ -189,13 +265,45 @@ public class GamePanel extends JPanel implements KeyListener {
                 if (now - lastFiredTime >= COOLDOWN_MS) {
                     lastFiredTime = now;
                     sendUDP(new PlayerAction(myPlayerId, ActionType.USE_ITEM, 0, 0, seqNumber++));
+
+                    // ── Find nearest enemy to draw beam toward ────────────────
+                    Player target = null;
+                    int minDist = Integer.MAX_VALUE;
+                    for (Player p : gameState.players) {
+                        if (p.playerId.equals(myPlayerId) || !p.connected)
+                            continue;
+                        int dist = Math.abs(p.gridX - me.gridX) + Math.abs(p.gridY - me.gridY);
+                        if (dist <= 2 && dist < minDist) {
+                            minDist = dist;
+                            target = p;
+                        }
+                    }
+                    beamFromX = me.gridX;
+                    beamFromY = me.gridY;
+                    if (target != null) {
+                        beamToX = target.gridX;
+                        beamToY = target.gridY;
+                    } else {
+                        // No target in range — fire a short beam in the last move direction
+                        // (or just pulse on self if direction unknown)
+                        beamToX = me.gridX;
+                        beamToY = me.gridY;
+                    }
+                    beamUntil = now + BEAM_MS;
                 }
             }
         }
     }
 
-    @Override public void keyReleased(KeyEvent e) { if (e.getKeyCode() < keys.length) keys[e.getKeyCode()] = false; }
-    @Override public void keyTyped(KeyEvent e) {}
+    @Override
+    public void keyReleased(KeyEvent e) {
+        if (e.getKeyCode() < keys.length)
+            keys[e.getKeyCode()] = false;
+    }
+
+    @Override
+    public void keyTyped(KeyEvent e) {
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Painting
@@ -205,32 +313,41 @@ public class GamePanel extends JPanel implements KeyListener {
     protected void paintComponent(Graphics g) {
         super.paintComponent(g);
         Graphics2D g2 = (Graphics2D) g;
-        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING,        RenderingHints.VALUE_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING,   RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
-        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION,       RenderingHints.VALUE_INTERPOLATION_BILINEAR);
+        g2.setRenderingHint(RenderingHints.KEY_ANTIALIASING, RenderingHints.VALUE_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_TEXT_ANTIALIASING, RenderingHints.VALUE_TEXT_ANTIALIAS_ON);
+        g2.setRenderingHint(RenderingHints.KEY_INTERPOLATION, RenderingHints.VALUE_INTERPOLATION_BILINEAR);
 
         // Fill entire window background
         g2.setColor(BG);
         g2.fillRect(0, 0, getWidth(), getHeight());
 
         // Scale content to fill window, maintaining aspect ratio
-        float scaleX = (float) getWidth()  / W;
+        float scaleX = (float) getWidth() / W;
         float scaleY = (float) getHeight() / H;
-        float scale  = Math.min(scaleX, scaleY);
-        float offsetX = (getWidth()  - W * scale) / 2f;
+        float scale = Math.min(scaleX, scaleY);
+        float offsetX = (getWidth() - W * scale) / 2f;
         float offsetY = (getHeight() - H * scale) / 2f;
 
         g2.translate(offsetX, offsetY);
         g2.scale(scale, scale);
 
-        if (gameState == null) { drawWaiting(g2); return; }
-        if (!gameState.gameStarted) { drawLobby(g2); return; }
+        if (gameState == null) {
+            drawWaiting(g2);
+            return;
+        }
+        if (!gameState.gameStarted) {
+            drawLobby(g2);
+            return;
+        }
 
         drawHUD(g2);
         drawArena(g2);
         drawFloatingTexts(g2);
+        drawFreezeBeam(g2);
+        drawChat(g2);
         drawStatusBar(g2);
-        if (gameState.gameOver) drawGameOverOverlay(g2);
+        if (gameState.gameOver)
+            drawGameOverOverlay(g2);
     }
 
     // ── Waiting screen ────────────────────────────────────────────────────────
@@ -348,7 +465,7 @@ public class GamePanel extends JPanel implements KeyListener {
         // Legend
         g.setFont(new Font("Monospaced", Font.PLAIN, 11));
         g.setColor(new Color(130, 130, 160));
-        g.drawString("WASD / Arrows: Move   |   SPACE: Fire Freeze Ray", 14, 56);
+        g.drawString("WASD/Arrows: Move  |  SPACE: Fire  |  T: Chat  |  Y: Whisper", 14, 56);
         g.setColor(new Color(100, 100, 130));
         g.drawString("Tick #" + gameState.currentTick, 14, 72);
     }
@@ -362,13 +479,21 @@ public class GamePanel extends JPanel implements KeyListener {
         // Grid lines
         g.setColor(GRID_LINE);
         g.setStroke(new BasicStroke(0.5f));
-        for (int c = 0; c <= COLS; c++) g.drawLine(c * CELL, oy, c * CELL, oy + ROWS * CELL);
-        for (int r = 0; r <= ROWS; r++) g.drawLine(0, oy + r * CELL, W, oy + r * CELL);
+        for (int c = 0; c <= COLS; c++)
+            g.drawLine(c * CELL, oy, c * CELL, oy + ROWS * CELL);
+        for (int r = 0; r <= ROWS; r++)
+            g.drawLine(0, oy + r * CELL, W, oy + r * CELL);
         g.setStroke(new BasicStroke(1f));
 
-        for (Zone z : gameState.zones)  drawZone(g, z, oy);
-        for (Item item : gameState.items) { if (!item.collected) drawItem(g, item, oy); }
-        for (Player p : gameState.players) if (p.connected) drawPlayer(g, p, oy);
+        for (Zone z : gameState.zones)
+            drawZone(g, z, oy);
+        for (Item item : gameState.items) {
+            if (!item.collected)
+                drawItem(g, item, oy);
+        }
+        for (Player p : gameState.players)
+            if (p.connected)
+                drawPlayer(g, p, oy);
 
         // Player info panel (top-left of arena)
         drawPlayerInfoPanel(g, oy);
@@ -377,7 +502,8 @@ public class GamePanel extends JPanel implements KeyListener {
     // ── Player info panel (top-left corner of arena) ──────────────────────────
     private void drawPlayerInfoPanel(Graphics2D g, int oy) {
         Player me = findPlayer(myPlayerId);
-        if (me == null) return;
+        if (me == null)
+            return;
 
         int px = 8, py = oy + 8;
         int pw = 155, ph = 80;
@@ -431,7 +557,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // ── Zone ─────────────────────────────────────────────────────────────────
     private void drawZone(Graphics2D g, Zone zone, int oy) {
-        int px = zone.x * CELL,  py = oy + zone.y * CELL;
+        int px = zone.x * CELL, py = oy + zone.y * CELL;
         int pw = zone.width * CELL, ph = zone.height * CELL;
 
         Color fill;
@@ -448,7 +574,7 @@ public class GamePanel extends JPanel implements KeyListener {
         if (zone.contestedBy != null) {
             g.setColor(new Color(255, 180, 0));
             g.setStroke(new BasicStroke(3f, BasicStroke.CAP_BUTT, BasicStroke.JOIN_MITER,
-                    10, new float[]{6, 4}, 0));
+                    10, new float[] { 6, 4 }, 0));
         } else if (zone.ownerId != null) {
             Player owner = findPlayer(zone.ownerId);
             g.setColor(owner != null ? owner.color : Color.WHITE);
@@ -465,15 +591,18 @@ public class GamePanel extends JPanel implements KeyListener {
         g.drawString("ZONE " + zone.zoneId, px + 5, py + 16);
 
         g.setFont(new Font("Monospaced", Font.BOLD, 11));
-        String statusText; Color statusColor;
+        String statusText;
+        Color statusColor;
         if (zone.contestedBy != null) {
-            statusText = "CONTESTED"; statusColor = new Color(255, 180, 0);
+            statusText = "CONTESTED";
+            statusColor = new Color(255, 180, 0);
         } else if (zone.ownerId != null) {
             Player owner = findPlayer(zone.ownerId);
-            statusText  = owner != null ? owner.name.toUpperCase() : "OWNED";
+            statusText = owner != null ? owner.name.toUpperCase() : "OWNED";
             statusColor = owner != null ? owner.color : Color.GREEN;
         } else {
-            statusText = "UNCLAIMED"; statusColor = new Color(160, 160, 190);
+            statusText = "UNCLAIMED";
+            statusColor = new Color(160, 160, 190);
         }
         g.setColor(statusColor);
         g.drawString(statusText, px + 5, py + 30);
@@ -483,7 +612,7 @@ public class GamePanel extends JPanel implements KeyListener {
             g.setColor(new Color(30, 30, 50));
             g.fillRoundRect(px + 3, barY, barW, 6, 4, 4);
             g.setColor(new Color(100, 220, 100));
-            g.fillRoundRect(px + 3, barY, (int)(barW * zone.captureProgress), 6, 4, 4);
+            g.fillRoundRect(px + 3, barY, (int) (barW * zone.captureProgress), 6, 4, 4);
         }
 
         if (zone.graceTimerExpiry > 0) {
@@ -514,7 +643,7 @@ public class GamePanel extends JPanel implements KeyListener {
                 g.drawString("E", cx - 4, cy + 4);
                 break;
             case FREEZE_RAY:
-                int[] xp = {cx, cx+r, cx, cx-r}, yp = {cy-r, cy, cy+r, cy};
+                int[] xp = { cx, cx + r, cx, cx - r }, yp = { cy - r, cy, cy + r, cy };
                 g.setColor(new Color(80, 220, 255, 200));
                 g.fillPolygon(xp, yp, 4);
                 g.setColor(new Color(0, 180, 240));
@@ -537,6 +666,36 @@ public class GamePanel extends JPanel implements KeyListener {
                 g.drawString("S", cx - 4, cy + 4);
                 break;
         }
+    }
+
+    private void drawFreezeBeam(Graphics2D g) {
+        if (System.currentTimeMillis() > beamUntil || beamFromX < 0)
+            return;
+
+        float progress = 1f - (float) (beamUntil - System.currentTimeMillis()) / BEAM_MS;
+        float alpha = 1f - progress; // fades out over BEAM_MS
+
+        int x1 = beamFromX * CELL + CELL / 2;
+        int y1 = HUD_H + beamFromY * CELL + CELL / 2;
+        int x2 = beamToX * CELL + CELL / 2;
+        int y2 = HUD_H + beamToY * CELL + CELL / 2;
+
+        // Outer glow (thick, low alpha)
+        g.setColor(new Color(80, 220, 255, (int) (alpha * 80)));
+        g.setStroke(new BasicStroke(10f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.drawLine(x1, y1, x2, y2);
+
+        // Core beam (thin, bright)
+        g.setColor(new Color(180, 240, 255, (int) (alpha * 220)));
+        g.setStroke(new BasicStroke(3f, BasicStroke.CAP_ROUND, BasicStroke.JOIN_ROUND));
+        g.drawLine(x1, y1, x2, y2);
+
+        // Impact flash circle at target end
+        int r = (int) (14 * alpha);
+        g.setColor(new Color(255, 255, 255, (int) (alpha * 180)));
+        g.fillOval(x2 - r, y2 - r, r * 2, r * 2);
+
+        g.setStroke(new BasicStroke(1f)); // reset stroke
     }
 
     // ── Player ────────────────────────────────────────────────────────────────
@@ -586,16 +745,16 @@ public class GamePanel extends JPanel implements KeyListener {
             for (FloatingText ft : floatingTexts) {
                 g.setFont(new Font("Monospaced", Font.BOLD, 16));
                 FontMetrics fm = g.getFontMetrics();
-                int tx = (int)(ft.x - fm.stringWidth(ft.text) / 2f);
+                int tx = (int) (ft.x - fm.stringWidth(ft.text) / 2f);
                 int ty = (int) ft.y;
 
                 // Shadow
-                g.setColor(new Color(0, 0, 0, (int)(ft.alpha * 180)));
+                g.setColor(new Color(0, 0, 0, (int) (ft.alpha * 180)));
                 g.drawString(ft.text, tx + 1, ty + 1);
 
                 // Text
                 g.setColor(new Color(ft.color.getRed(), ft.color.getGreen(),
-                        ft.color.getBlue(), (int)(ft.alpha * 255)));
+                        ft.color.getBlue(), alpha(ft.alpha, 255)));
                 g.drawString(ft.text, tx, ty);
             }
         }
@@ -610,7 +769,8 @@ public class GamePanel extends JPanel implements KeyListener {
         g.fillRect(0, sy, W, 2);
 
         Player me = findPlayer(myPlayerId);
-        if (me == null) return;
+        if (me == null)
+            return;
 
         // Left: name + score
         g.setFont(new Font("Monospaced", Font.BOLD, 13));
@@ -622,8 +782,14 @@ public class GamePanel extends JPanel implements KeyListener {
         nx += g.getFontMetrics().stringWidth("Score: " + me.score) + 20;
 
         // Status badges
-        if (me.frozen)    { drawBadge(g, "FROZEN",      new Color(100, 200, 255), nx, sy + 8); nx += 90;  }
-        if (me.hasWeapon) { drawBadge(g, "FREEZE RAY",  new Color(0, 210, 240),   nx, sy + 8); nx += 120; }
+        if (me.frozen) {
+            drawBadge(g, "FROZEN", new Color(100, 200, 255), nx, sy + 8);
+            nx += 90;
+        }
+        if (me.hasWeapon) {
+            drawBadge(g, "FREEZE RAY", new Color(0, 210, 240), nx, sy + 8);
+            nx += 120;
+        }
         if (me.speedBoostUntil > System.currentTimeMillis()) {
             drawBadge(g, "SPEED BOOST", new Color(220, 80, 255), nx, sy + 8);
             nx += 130;
@@ -635,7 +801,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // ── Cooldown indicator ────────────────────────────────────────────────────
     private void drawCooldownIndicator(Graphics2D g, int sy) {
-        long elapsed  = System.currentTimeMillis() - lastFiredTime;
+        long elapsed = System.currentTimeMillis() - lastFiredTime;
         boolean ready = elapsed >= COOLDOWN_MS || lastFiredTime == 0;
         float progress = ready ? 1f : (float) elapsed / COOLDOWN_MS;
 
@@ -648,7 +814,7 @@ public class GamePanel extends JPanel implements KeyListener {
         // Progress bar fill
         Color barColor = ready ? new Color(0, 220, 120) : new Color(80, 130, 200);
         g.setColor(barColor);
-        g.fillRoundRect(bx, by, (int)(bw * progress), bh, 8, 8);
+        g.fillRoundRect(bx, by, (int) (bw * progress), bh, 8, 8);
 
         // Border
         g.setColor(ready ? new Color(0, 200, 100) : new Color(60, 100, 180));
@@ -658,8 +824,7 @@ public class GamePanel extends JPanel implements KeyListener {
 
         // Label
         g.setFont(new Font("Monospaced", Font.BOLD, 12));
-        String label = ready ? "FREEZE RAY  READY" :
-                String.format("COOLDOWN  %.1fs", (COOLDOWN_MS - elapsed) / 1000f);
+        String label = ready ? "FREEZE RAY  READY" : String.format("COOLDOWN  %.1fs", (COOLDOWN_MS - elapsed) / 1000f);
         g.setColor(ready ? Color.WHITE : new Color(180, 210, 255));
         FontMetrics fm = g.getFontMetrics();
         g.drawString(label, bx + (bw - fm.stringWidth(label)) / 2, by + 21);
@@ -705,7 +870,8 @@ public class GamePanel extends JPanel implements KeyListener {
         sorted.sort((a, b) -> b.score - a.score);
         for (Player p : sorted) {
             sb.append(p.name).append(": ").append(p.score).append(" pts");
-            if (p.playerId.equals(state.winnerId)) sb.append("  <- WINNER");
+            if (p.playerId.equals(state.winnerId))
+                sb.append("  <- WINNER");
             sb.append("\n");
         }
         JOptionPane.showMessageDialog(this, sb.toString(), "ChronoArena — Game Over",
@@ -714,14 +880,205 @@ public class GamePanel extends JPanel implements KeyListener {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
     private Player findPlayer(String id) {
-        if (gameState == null || id == null) return null;
-        for (Player p : gameState.players) if (p.playerId.equals(id)) return p;
+        if (gameState == null || id == null)
+            return null;
+        for (Player p : gameState.players)
+            if (p.playerId.equals(id))
+                return p;
         return null;
     }
 
     private Player findPlayerInState(GameState state, String id) {
-        if (state == null || id == null) return null;
-        for (Player p : state.players) if (p.playerId.equals(id)) return p;
+        if (state == null || id == null)
+            return null;
+        for (Player p : state.players)
+            if (p.playerId.equals(id))
+                return p;
         return null;
     }
+
+    // ── Chat: open input box ──────────────────────────────────────────────────
+    private void openChat(boolean whisper, String targetId) {
+        chatOpen = true;
+        whisperMode = whisper;
+        whisperTarget = targetId != null ? targetId : "";
+        chatInput.setLength(0);
+        repaint();
+    }
+
+    // ── Chat: handle a key while the input box is open ────────────────────────
+    private void handleChatKey(KeyEvent e) {
+        int k = e.getKeyCode();
+
+        if (k == KeyEvent.VK_ESCAPE) {
+            chatOpen = false;
+            repaint();
+            return;
+        }
+        if (k == KeyEvent.VK_ENTER) {
+            String text = chatInput.toString().trim();
+            if (!text.isEmpty()) {
+                if (whisperMode && whisperTarget.isEmpty()) {
+                    // First token is the target player ID, rest is message
+                    // Format expected: "<playerId> <message>"
+                    int sp = text.indexOf(' ');
+                    if (sp > 0) {
+                        whisperTarget = text.substring(0, sp);
+                        text = text.substring(sp + 1).trim();
+                    } else {
+                        // No space — can't determine target, abort
+                        chatOpen = false;
+                        repaint();
+                        return;
+                    }
+                }
+                sendChat(text);
+            }
+            chatOpen = false;
+            repaint();
+            return;
+        }
+        if (k == KeyEvent.VK_BACK_SPACE && chatInput.length() > 0) {
+            chatInput.deleteCharAt(chatInput.length() - 1);
+        } else {
+            char c = e.getKeyChar();
+            if (c != KeyEvent.CHAR_UNDEFINED && !Character.isISOControl(c) && chatInput.length() < 120) {
+                chatInput.append(c);
+            }
+        }
+        repaint();
+    }
+
+    // ── Chat: build and send a ChatMessage over TCP ───────────────────────────
+    private void sendChat(String text) {
+        if (tcpOut == null)
+            return;
+        Player me = findPlayer(myPlayerId);
+        String name = me != null ? me.name : myPlayerId;
+        String target = whisperMode ? resolveWhisperTarget() : null;
+        ChatMessage cm = new ChatMessage(myPlayerId, name, target, text);
+        Message.Type type = whisperMode ? Message.Type.WHISPER : Message.Type.CHAT;
+        tcpSendQueue.offer(new Message(type, cm));
+    }
+
+    /**
+     * Resolves whisperTarget (which may be a name or ID typed by the user)
+     * to a playerId. Falls back to the raw string if no match found.
+     */
+    private String resolveWhisperTarget() {
+        if (gameState == null)
+            return whisperTarget;
+        for (Player p : gameState.players) {
+            if (p.playerId.equalsIgnoreCase(whisperTarget) ||
+                    p.name.equalsIgnoreCase(whisperTarget))
+                return p.playerId;
+        }
+        return whisperTarget; // pass through; server will route or drop
+    }
+
+    // ── Chat: called by ServerListener when a message arrives ─────────────────
+    public void receiveChat(ChatMessage cm, boolean whisper) {
+        ChatLine line = new ChatLine();
+        if (whisper) {
+            boolean fromMe = cm.senderId.equals(myPlayerId);
+            Player other = findPlayer(fromMe ? cm.targetId : cm.senderId);
+            String tag = fromMe ? "→ " + (other != null ? other.name : cm.targetId)
+                    : "← " + cm.senderName;
+            line.display = "[Whisper " + tag + "] " + cm.text;
+            line.color = new Color(220, 160, 255);
+            line.whisper = true;
+        } else {
+            line.display = "[Global] " + cm.senderName + ": " + cm.text;
+            line.color = new Color(200, 220, 255);
+            line.whisper = false;
+        }
+        synchronized (chatHistory) {
+            chatHistory.addLast(line);
+            while (chatHistory.size() > CHAT_MAX)
+                chatHistory.removeFirst();
+        }
+        SwingUtilities.invokeLater(this::repaint);
+    }
+
+    // ── Chat overlay (bottom-left of arena) ───────────────────────────────────
+    private void drawChat(Graphics2D g) {
+        int lineH = 17;
+        int panelW = 420;
+        int maxLines = CHAT_SHOW;
+
+        // Gather the most recent lines
+        List<ChatLine> recent;
+        synchronized (chatHistory) {
+            recent = new ArrayList<>(chatHistory);
+        }
+        // Only keep the last maxLines
+        if (recent.size() > maxLines)
+            recent = recent.subList(recent.size() - maxLines, recent.size());
+
+        long now = System.currentTimeMillis();
+        int baseY = HUD_H + ROWS * CELL - 10 - (chatOpen ? lineH + 10 : 0);
+
+        for (int i = recent.size() - 1; i >= 0; i--) {
+            ChatLine cl = recent.get(i);
+            long age = now - cl.arrivedAt;
+            float fade = chatOpen ? 1f : Math.max(0f, 1f - (float) (age - CHAT_FADE_MS / 2) / (CHAT_FADE_MS / 2));
+            if (fade <= 0)
+                continue;
+
+            int lineY = baseY - (recent.size() - 1 - i) * lineH;
+
+            // Background strip
+            g.setColor(new Color(0, 0, 0, alpha(fade, 140)));
+            g.fillRoundRect(8, lineY - 13, panelW, lineH, 4, 4);
+
+            // Text
+            g.setFont(new Font("Monospaced", Font.PLAIN, 12));
+            g.setColor(new Color(cl.color.getRed(), cl.color.getGreen(), cl.color.getBlue(), alpha(fade, 255)));
+            g.drawString(clip(cl.display, panelW - 10, g), 13, lineY);
+        }
+
+        // Input box
+        if (chatOpen) {
+            int boxY = HUD_H + ROWS * CELL - 8;
+            g.setColor(new Color(10, 10, 25, 220));
+            g.fillRoundRect(8, boxY - 16, panelW, lineH + 4, 6, 6);
+            g.setColor(whisperMode ? new Color(200, 130, 255) : new Color(100, 180, 255));
+            g.setStroke(new BasicStroke(1.5f));
+            g.drawRoundRect(8, boxY - 16, panelW, lineH + 4, 6, 6);
+            g.setStroke(new BasicStroke(1f));
+
+            String prefix = whisperMode
+                    ? "[Whisper" + (whisperTarget.isEmpty() ? " <id> msg>" : " → " + whisperTarget + ">") + " "
+                    : "[Global] ";
+            g.setFont(new Font("Monospaced", Font.BOLD, 12));
+            g.setColor(whisperMode ? new Color(220, 160, 255) : new Color(140, 200, 255));
+            g.drawString(prefix, 13, boxY);
+
+            int prefixW = g.getFontMetrics().stringWidth(prefix);
+            g.setColor(Color.WHITE);
+            String inputDisplay = chatInput.toString() + "|";
+            g.drawString(inputDisplay, 13 + prefixW, boxY);
+        } else {
+            // Hint when closed
+            g.setFont(new Font("Monospaced", Font.PLAIN, 10));
+            g.setColor(new Color(90, 90, 120));
+            g.drawString("T: chat   Y: whisper", 13, HUD_H + ROWS * CELL - 6);
+        }
+    }
+
+    /** Clips a string so it doesn't overflow panelW pixels. */
+    private String clip(String s, int maxW, Graphics2D g) {
+        FontMetrics fm = g.getFontMetrics();
+        if (fm.stringWidth(s) <= maxW)
+            return s;
+        while (s.length() > 0 && fm.stringWidth(s + "…") > maxW)
+            s = s.substring(0, s.length() - 1);
+        return s + "…";
+    }
+
+    // Helper because I dont understand floating points
+    private int alpha(float a, int max) {
+        return Math.min(max, Math.max(0, (int) (a * max)));
+    }
+
 }

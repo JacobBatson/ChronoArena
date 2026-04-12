@@ -21,9 +21,9 @@ public class ServerMain {
             System.out.println("config.properties not found — using defaults");
         }
 
-        int tcpPort      = Integer.parseInt(config.getProperty("server.tcp.port",  "12345"));
-        int udpPort      = Integer.parseInt(config.getProperty("server.udp.port",  "12346"));
-        int gameDuration = Integer.parseInt(config.getProperty("game.duration",    "120"));
+        int tcpPort = Integer.parseInt(config.getProperty("server.tcp.port", "12345"));
+        int udpPort = Integer.parseInt(config.getProperty("server.udp.port", "12346"));
+        int gameDuration = Integer.parseInt(config.getProperty("game.duration", "120"));
 
         // ── Create engine (duration overridden at Start) ──────────────────────
         GameEngine engine = new GameEngine(gameDuration);
@@ -89,8 +89,8 @@ public class ServerMain {
         engine.start();
 
         // ── Build the window ──────────────────────────────────────────────────
-        JFrame[]     frameRef  = new JFrame[1];
-        LobbyPanel[] lobbyRef  = new LobbyPanel[1];
+        JFrame[] frameRef = new JFrame[1];
+        LobbyPanel[] lobbyRef = new LobbyPanel[1];
 
         lobbyRef[0] = new LobbyPanel(() -> {
             // Called on EDT when operator clicks "Start Game"
@@ -102,9 +102,13 @@ public class ServerMain {
             GamePanel serverPanel = new GamePanel("SERVER", null, null, null, 0);
             engine.addListener(new GameEngine.Listener() {
                 @Override
-                public void onTick(GameState state) { serverPanel.updateState(state); }
+                public void onTick(GameState state) {
+                    serverPanel.updateState(state);
+                }
+
                 @Override
-                public void onPlayerKilled(String playerId, String reason) {}
+                public void onPlayerKilled(String playerId, String reason) {
+                }
             });
 
             JFrame frame = frameRef[0];
@@ -131,7 +135,7 @@ public class ServerMain {
             String line = scanner.nextLine().trim();
             if (line.startsWith("kill ")) {
                 String[] parts = line.split(" ", 3);
-                String id     = parts[1];
+                String id = parts[1];
                 String reason = parts.length > 2 ? parts[2] : "Kicked by server";
                 engine.killPlayer(id, reason);
             }
