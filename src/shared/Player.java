@@ -16,6 +16,9 @@ public class Player implements Serializable {
     public boolean connected;
     public int lastMoveSeq;
     public int lastActionSeq;
+    public int activeEmote = 0;
+    public long emoteStartTime = 0;
+    public long emoteEndTime = 0;
 
     public Player(String playerId, String name,
             int gridX, int gridY, Color color) {

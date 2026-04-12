@@ -274,6 +274,11 @@ public class GameEngine {
                 processFreeze(action);
         }
 
+        for (PlayerAction action : actions) {
+            if (action.type == ActionType.EMOTE)
+                processEmote(action);
+        }
+
         // 4. Zone capture logic
         updateZones();
 
@@ -370,6 +375,18 @@ public class GameEngine {
             target.score = Math.max(0, target.score - FREEZE_PENALTY);
             System.out.println("[Engine] " + attacker.name + " froze " + target.name);
         }
+    }
+
+    private void processEmote(PlayerAction action) {
+        Player p = findPlayer(action.playerId);
+        if (p == null || !p.connected)
+            return;
+        if (action.dx < 1 || action.dx > 4)
+            return;
+        // Set emote state
+        p.activeEmote = action.dx;
+        p.emoteStartTime = System.currentTimeMillis();
+        p.emoteEndTime = p.emoteStartTime + 1500; // 1.5 seconds
     }
 
     // ── Zone Logic ────────────────────────────────────────────────────────────

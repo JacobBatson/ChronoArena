@@ -258,6 +258,22 @@ public class GamePanel extends JPanel implements KeyListener {
             return;
         }
 
+        if (k == KeyEvent.VK_1) {
+            sendUDP(new PlayerAction(myPlayerId, ActionType.EMOTE, 1, 0, seqNumber++)); // laugh
+        }
+
+        if (k == KeyEvent.VK_2) {
+            sendUDP(new PlayerAction(myPlayerId, ActionType.EMOTE, 2, 0, seqNumber++)); // cry
+        }
+
+        if (k == KeyEvent.VK_3) {
+            sendUDP(new PlayerAction(myPlayerId, ActionType.EMOTE, 3, 0, seqNumber++)); // angry
+        }
+
+        if (k == KeyEvent.VK_4) {
+            sendUDP(new PlayerAction(myPlayerId, ActionType.EMOTE, 4, 0, seqNumber++)); // wave
+        }
+
         if (k == KeyEvent.VK_SPACE && gameState != null && gameState.gameStarted) {
             Player me = findPlayer(myPlayerId);
             if (me != null && me.hasWeapon) {
@@ -737,6 +753,79 @@ public class GamePanel extends JPanel implements KeyListener {
         g.setColor(isMe ? Color.WHITE : new Color(200, 200, 200));
         FontMetrics fm = g.getFontMetrics();
         g.drawString(name, px + (CELL - fm.stringWidth(name)) / 2, py + CELL - 1);
+
+        if (player.emoteEndTime > System.currentTimeMillis()) {
+            drawEmote(g, player, px, py);
+        }
+    }
+
+    private void drawEmote(Graphics2D g, Player player, int px, int py) {
+
+        String emote;
+
+        switch (player.activeEmote) {
+            case 1:
+                emote = "😂";
+                break;
+            case 2:
+                emote = "😢";
+                break;
+            case 3:
+                emote = "😡";
+                break;
+            default:
+                emote = "👋";
+                break;
+        }
+
+        // ── FONT ─────────────────────────────────────────────
+        Font font = new Font("Monospaced", Font.BOLD, 16);
+        g.setFont(font);
+        FontMetrics fm = g.getFontMetrics();
+
+        // ── CENTER ABOVE PLAYER ─────────────────────────────
+        int cx = px + CELL / 2;
+        int cy = py + CELL / 2;
+
+        float duration = 200f; // ms
+        float t = (System.currentTimeMillis() - player.emoteStartTime) / duration;
+        t = Math.max(0f, Math.min(1f, t));
+
+        t = (float) (1 - Math.pow(1 - t, 3));
+
+        float alpha = t;
+
+        // ── BUBBLE SIZE ─────────────────────────────────────
+        int padding = 6;
+
+        int textW = fm.stringWidth(emote);
+        int textH = fm.getHeight();
+
+        float scale = 0.3f + (0.7f * t);
+
+        int bubbleW = (int) ((textW + padding * 2) * scale);
+        int bubbleH = (int) ((textH + padding) * scale);
+
+        int bubbleX = cx - bubbleW / 2;
+        int bubbleY = cy - (CELL / 2) - bubbleH - 8;
+
+        // ── BUBBLE BACKGROUND ───────────────────────────────
+        g.setColor(new Color(0, 0, 0, (int) (160 * alpha)));
+        g.fillRoundRect(bubbleX, bubbleY, bubbleW, bubbleH, 10, 10);
+
+        // ── BORDER ──────────────────────────────────────────
+        g.setColor(new Color(255, 255, 255, (int) (180 * alpha)));
+        g.setStroke(new BasicStroke(1.2f));
+        g.drawRoundRect(bubbleX, bubbleY, bubbleW, bubbleH, 10, 10);
+        g.setStroke(new BasicStroke(1f));
+
+        // ── TEXT ────────────────────────────────────────────
+        g.setColor(new Color(255, 255, 255, (int) (255 * alpha)));
+
+        int textX = bubbleX + (bubbleW - textW) / 2;
+        int textY = bubbleY + fm.getAscent();
+
+        g.drawString(emote, textX, textY);
     }
 
     // ── Floating text ─────────────────────────────────────────────────────────
