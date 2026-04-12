@@ -5,5 +5,6 @@ public enum ActionType {
     FREEZE,
     USE_ITEM,
     JOIN,
-    LEAVE
+    LEAVE,
+    EMOTE
 }

@@ -21,21 +21,25 @@ public class ClientMain {
             System.out.println("config.properties not found — using defaults");
         }
 
-        int tcpPort     = Integer.parseInt(config.getProperty("server.tcp.port", "12345"));
-        int udpPort     = Integer.parseInt(config.getProperty("server.udp.port", "12346"));
+        int tcpPort = Integer.parseInt(config.getProperty("server.tcp.port", "12345"));
+        int udpPort = Integer.parseInt(config.getProperty("server.udp.port", "12346"));
 
         // ── Ask server IP ─────────────────────────────────────────────────────
         String defaultIp = config.getProperty("server.ip", "localhost");
         String serverIp = JOptionPane.showInputDialog(null,
                 "Enter server IP address:", defaultIp);
-        if (serverIp == null) System.exit(0);
-        if (serverIp.trim().isEmpty()) serverIp = defaultIp;
-        else serverIp = serverIp.trim();
+        if (serverIp == null)
+            System.exit(0);
+        if (serverIp.trim().isEmpty())
+            serverIp = defaultIp;
+        else
+            serverIp = serverIp.trim();
 
         // ── Ask player name ───────────────────────────────────────────────────
         String playerName = JOptionPane.showInputDialog(null,
                 "Enter your player name:", "ChronoArena", JOptionPane.PLAIN_MESSAGE);
-        if (playerName == null || playerName.trim().isEmpty()) System.exit(0);
+        if (playerName == null || playerName.trim().isEmpty())
+            System.exit(0);
         playerName = playerName.trim();
 
         // ── Connect TCP ───────────────────────────────────────────────────────
@@ -45,7 +49,7 @@ public class ClientMain {
         } catch (ConnectException ex) {
             JOptionPane.showMessageDialog(null,
                     "Could not connect to server at " + serverIp + ":" + tcpPort
-                    + ".\n\nMake sure the server is running and try again.",
+                            + ".\n\nMake sure the server is running and try again.",
                     "Connection Failed", JOptionPane.ERROR_MESSAGE);
             return;
         }
@@ -68,7 +72,7 @@ public class ClientMain {
 
         // ── UDP socket ────────────────────────────────────────────────────────
         DatagramSocket udpSocket = new DatagramSocket();
-        InetAddress serverAddr   = InetAddress.getByName(serverIp);
+        InetAddress serverAddr = InetAddress.getByName(serverIp);
 
         // ── Build GUI ─────────────────────────────────────────────────────────
         GamePanel panel = new GamePanel(playerId, out, udpSocket, serverAddr, udpPort);
@@ -83,7 +87,8 @@ public class ClientMain {
             try {
                 out.writeObject(new Message(Message.Type.LEAVE, playerId));
                 out.flush();
-            } catch (IOException ignored) {}
+            } catch (IOException ignored) {
+            }
         }));
     }
 

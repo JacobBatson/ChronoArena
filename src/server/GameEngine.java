@@ -10,7 +10,7 @@ import java.util.concurrent.ConcurrentLinkedQueue;
 /**
  * GameEngine — the authoritative brain of ChronoArena.
  *
- * Runs a fixed-rate game loop (100 ms / tick).  All player actions
+ * Runs a fixed-rate game loop (100 ms / tick). All player actions
  * arrive via enqueueAction() from the UDP receiver thread and are
  * drained + processed once per tick, guaranteeing fairness.
  */
@@ -20,6 +20,7 @@ public class GameEngine {
     public interface Listener {
         /** Called at the end of every tick with the latest game state. */
         void onTick(GameState state);
+
         /** Called when a player is forcibly killed (KILL_SWITCH). */
         void onPlayerKilled(String playerId, String reason);
     }
@@ -28,40 +29,40 @@ public class GameEngine {
     public static final int COLS = 20;
     public static final int ROWS = 15;
 
-    private static final int    TICK_MS                 = 100;   // ms per tick
-    private static final int    CAPTURE_TICKS           = 30;    // ticks to fully capture
-    private static final float  CAPTURE_RATE            = 1f / CAPTURE_TICKS;
-    private static final long   FREEZE_DURATION_MS      = 3_000;
-    private static final long   SPEED_BOOST_DURATION_MS = 3_000;
-    private static final long   GRACE_PERIOD_MS         = 5_000;
-    private static final int    FREEZE_RANGE            = 2;     // Manhattan distance
-    private static final int    FREEZE_PENALTY          = 10;
-    private static final int    ENERGY_BONUS            = 10;
-    private static final int    ZONE_POINTS_INTERVAL    = 10;    // ticks → 1 s
-    private static final int    ITEM_SPAWN_INTERVAL     = 30;    // ticks → 3 s
-    private static final int    MAX_ITEMS               = 5;
+    private static final int TICK_MS = 100; // ms per tick
+    private static final int CAPTURE_TICKS = 30; // ticks to fully capture
+    private static final float CAPTURE_RATE = 1f / CAPTURE_TICKS;
+    private static final long FREEZE_DURATION_MS = 3_000;
+    private static final long SPEED_BOOST_DURATION_MS = 3_000;
+    private static final long GRACE_PERIOD_MS = 5_000;
+    private static final int FREEZE_RANGE = 2; // Manhattan distance
+    private static final int FREEZE_PENALTY = 10;
+    private static final int ENERGY_BONUS = 10;
+    private static final int ZONE_POINTS_INTERVAL = 10; // ticks → 1 s
+    private static final int ITEM_SPAWN_INTERVAL = 30; // ticks → 3 s
+    private static final int MAX_ITEMS = 5;
 
     /** Fixed colours for the first 4 players. */
     private static final Color[] BASE_COLORS = {
-        new Color(80,  130, 255),   // blue
-        new Color(255, 80,  80),    // red
-        new Color(80,  200, 80),    // green
-        new Color(255, 160, 0)      // orange
+            new Color(80, 130, 255), // blue
+            new Color(255, 80, 80), // red
+            new Color(80, 200, 80), // green
+            new Color(255, 160, 0) // orange
     };
 
     // ── Fields ────────────────────────────────────────────────────────────────
-    private final GameState                      gameState;
+    private final GameState gameState;
     private final ConcurrentLinkedQueue<PlayerAction> actionQueue = new ConcurrentLinkedQueue<>();
-    private final List<Listener>                 listeners   = new ArrayList<>();
-    private final Random                         random      = new Random();
+    private final List<Listener> listeners = new ArrayList<>();
+    private final Random random = new Random();
 
     /** Server-side only: tracks which player is currently capturing each zone. */
     private final Map<String, String> zoneCapturer = new HashMap<>();
 
-    private int              playerIdCounter = 1;
-    private int              itemIdCounter   = 1;
-    private boolean          running         = false;
-    private volatile boolean gameStarted     = false;
+    private int playerIdCounter = 1;
+    private int itemIdCounter = 1;
+    private boolean running = false;
+    private volatile boolean gameStarted = false;
 
     // ── Constructor ───────────────────────────────────────────────────────────
     public GameEngine(int gameDurationSeconds) {
@@ -71,7 +72,7 @@ public class GameEngine {
 
     /** Place three zones at random non-overlapping positions. */
     private void initZones() {
-        String[] ids = {"A", "B", "C"};
+        String[] ids = { "A", "B", "C" };
         for (String id : ids) {
             int[] pos = randomZonePosition();
             gameState.zones.add(new Zone(id, pos[0], pos[1], 3, 3));
@@ -86,18 +87,22 @@ public class GameEngine {
         for (int attempt = 0; attempt < 200; attempt++) {
             int x = 1 + random.nextInt(COLS - 4); // [1, COLS-4]
             int y = 1 + random.nextInt(ROWS - 4); // [1, ROWS-4]
-            if (!overlapsExistingZone(x, y)) return new int[]{x, y};
+            if (!overlapsExistingZone(x, y))
+                return new int[] { x, y };
         }
         // Fallback: evenly spaced columns, middle row
         int idx = gameState.zones.size();
-        return new int[]{2 + idx * 6, ROWS / 2 - 1};
+        return new int[] { 2 + idx * 6, ROWS / 2 - 1 };
     }
 
-    /** Returns true if a 3×3 zone at (x,y) overlaps any existing zone (with 1-cell buffer). */
+    /**
+     * Returns true if a 3×3 zone at (x,y) overlaps any existing zone (with 1-cell
+     * buffer).
+     */
     private boolean overlapsExistingZone(int x, int y) {
         for (Zone z : gameState.zones) {
-            if (x < z.x + z.width  + 1 && x + 3 + 1 > z.x &&
-                y < z.y + z.height + 1 && y + 3 + 1 > z.y) {
+            if (x < z.x + z.width + 1 && x + 3 + 1 > z.x &&
+                    y < z.y + z.height + 1 && y + 3 + 1 > z.y) {
                 return true;
             }
         }
@@ -106,47 +111,57 @@ public class GameEngine {
 
     // ── Public API ────────────────────────────────────────────────────────────
 
-    public void addListener(Listener l)    { listeners.add(l); }
+    public void addListener(Listener l) {
+        listeners.add(l);
+    }
 
     /** Returns a reference to the live game state (read-only from outside). */
-    public GameState getGameState()        { return gameState; }
+    public GameState getGameState() {
+        return gameState;
+    }
 
     /** Enqueues an action from the UDP receiver thread. Thread-safe. */
-    public void enqueueAction(PlayerAction action) { actionQueue.offer(action); }
+    public void enqueueAction(PlayerAction action) {
+        actionQueue.offer(action);
+    }
 
     /**
      * Adds a new player to the game.
      * Called by ClientHandler when a JOIN message arrives over TCP.
      */
     public synchronized Player addPlayer(String name) {
-        int slot  = gameState.players.size();
+        int slot = gameState.players.size();
         int[] pos = spawnPosition();
         Color color = slot < BASE_COLORS.length
                 ? BASE_COLORS[slot]
                 : Color.getHSBColor(slot / 8f, 0.75f, 1f);
 
         String id = "p" + playerIdCounter++;
-        Player p  = new Player(id, name, pos[0], pos[1], color);
+        Player p = new Player(id, name, pos[0], pos[1], color);
         gameState.players.add(p);
         System.out.println("[Engine] Player joined: " + name + " (" + id + ")");
         return p;
     }
 
-    /** Returns a random spawn position that is not inside a zone and not occupied. */
+    /**
+     * Returns a random spawn position that is not inside a zone and not occupied.
+     */
     private int[] spawnPosition() {
         for (int attempt = 0; attempt < 200; attempt++) {
             int x = random.nextInt(COLS);
             int y = random.nextInt(ROWS);
-            if (!isCellOccupiedByPlayer(x, y) && !isCellInAnyZone(x, y)) return new int[]{x, y};
+            if (!isCellOccupiedByPlayer(x, y) && !isCellInAnyZone(x, y))
+                return new int[] { x, y };
         }
         // Fallback: place anywhere not occupied
-        return new int[]{random.nextInt(COLS), random.nextInt(ROWS)};
+        return new int[] { random.nextInt(COLS), random.nextInt(ROWS) };
     }
 
     /** Returns true if (x,y) falls inside any zone's rectangle. */
     private boolean isCellInAnyZone(int x, int y) {
         for (Zone z : gameState.zones) {
-            if (x >= z.x && x < z.x + z.width && y >= z.y && y < z.y + z.height) return true;
+            if (x >= z.x && x < z.x + z.width && y >= z.y && y < z.y + z.height)
+                return true;
         }
         return false;
     }
@@ -157,7 +172,8 @@ public class GameEngine {
      */
     public synchronized void removePlayer(String playerId) {
         Player p = findPlayer(playerId);
-        if (p == null) return;
+        if (p == null)
+            return;
         p.connected = false;
         System.out.println("[Engine] Player disconnected: " + p.name);
 
@@ -184,7 +200,8 @@ public class GameEngine {
 
     /** Starts the game loop on a dedicated daemon thread. */
     public void start() {
-        if (running) return;
+        if (running)
+            return;
         running = true;
         Thread t = new Thread(this::runLoop, "GameLoop");
         t.setDaemon(true);
@@ -197,7 +214,10 @@ public class GameEngine {
         running = false;
     }
 
-    /** Unpauses the game — timer and scoring begin. Call when the operator clicks Start. */
+    /**
+     * Unpauses the game — timer and scoring begin. Call when the operator clicks
+     * Start.
+     */
     public void startGame() {
         gameStarted = true;
         System.out.println("[Engine] Game started.");
@@ -217,10 +237,14 @@ public class GameEngine {
             tick();
 
             long elapsed = System.currentTimeMillis() - tickStart;
-            long sleep   = TICK_MS - elapsed;
+            long sleep = TICK_MS - elapsed;
             if (sleep > 0) {
-                try { Thread.sleep(sleep); }
-                catch (InterruptedException e) { Thread.currentThread().interrupt(); break; }
+                try {
+                    Thread.sleep(sleep);
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
             }
         }
         System.out.println("[Engine] Game loop ended. Game over: " + gameState.gameOver);
@@ -235,17 +259,24 @@ public class GameEngine {
         // 1. Drain ALL queued actions into a local list (snapshot)
         List<PlayerAction> actions = new ArrayList<>();
         PlayerAction a;
-        while ((a = actionQueue.poll()) != null) actions.add(a);
+        while ((a = actionQueue.poll()) != null)
+            actions.add(a);
 
         // 2. Process MOVE actions first
         for (PlayerAction action : actions) {
-            if (action.type == ActionType.MOVE) processMove(action);
+            if (action.type == ActionType.MOVE)
+                processMove(action);
         }
 
         // 3. Process FREEZE / USE_ITEM actions
         for (PlayerAction action : actions) {
             if (action.type == ActionType.FREEZE || action.type == ActionType.USE_ITEM)
                 processFreeze(action);
+        }
+
+        for (PlayerAction action : actions) {
+            if (action.type == ActionType.EMOTE)
+                processEmote(action);
         }
 
         // 4. Zone capture logic
@@ -257,7 +288,8 @@ public class GameEngine {
         // 6. Frozen / speed-boost timers
         updateTimers();
 
-        // 7. Every 10 ticks (1 second): zone points + timer countdown (only after game started)
+        // 7. Every 10 ticks (1 second): zone points + timer countdown (only after game
+        // started)
         if (gameStarted && gameState.currentTick % ZONE_POINTS_INTERVAL == 0 && gameState.currentTick > 0) {
             awardZonePoints();
             decrementTimer();
@@ -272,13 +304,15 @@ public class GameEngine {
         gameState.currentTick++;
 
         // 10. Check game over (only after game started)
-        if (gameStarted) checkGameOver();
+        if (gameStarted)
+            checkGameOver();
 
         // Propagate lobby/started state to clients
         gameState.gameStarted = gameStarted;
 
         // 11. Notify all listeners (ClientHandlers broadcast to clients)
-        for (Listener l : listeners) l.onTick(gameState);
+        for (Listener l : listeners)
+            l.onTick(gameState);
     }
 
     // ── Action Processing ─────────────────────────────────────────────────────
@@ -289,11 +323,13 @@ public class GameEngine {
      */
     private void processMove(PlayerAction action) {
         Player p = findPlayer(action.playerId);
-        if (p == null || !p.connected || p.frozen) return;
+        if (p == null || !p.connected || p.frozen)
+            return;
 
         // Out-of-order / duplicate packet check
-        if (action.seqNumber <= p.lastSeqNumber) return;
-        p.lastSeqNumber = action.seqNumber;
+        if (action.seqNumber <= p.lastMoveSeq)
+            return;
+        p.lastMoveSeq = action.seqNumber;
 
         // Speed boost: move 2 cells instead of 1
         int step = (System.currentTimeMillis() < p.speedBoostUntil) ? 2 : 1;
@@ -311,31 +347,46 @@ public class GameEngine {
      */
     private void processFreeze(PlayerAction action) {
         Player attacker = findPlayer(action.playerId);
-        if (attacker == null || !attacker.connected || attacker.frozen || !attacker.hasWeapon) return;
+        if (attacker == null || !attacker.connected || attacker.frozen || !attacker.hasWeapon)
+            return;
 
         // Out-of-order / duplicate packet check
-        if (action.seqNumber <= attacker.lastSeqNumber) return;
-        attacker.lastSeqNumber = action.seqNumber;
+        if (action.seqNumber <= attacker.lastActionSeq)
+            return;
+        attacker.lastActionSeq = action.seqNumber;
 
         // Find nearest connected, non-frozen enemy within range
-        Player target    = null;
-        int    minDist   = Integer.MAX_VALUE;
+        Player target = null;
+        int minDist = Integer.MAX_VALUE;
         for (Player p : gameState.players) {
-            if (p.playerId.equals(attacker.playerId) || !p.connected) continue;
+            if (p.playerId.equals(attacker.playerId) || !p.connected)
+                continue;
             int dist = Math.abs(p.gridX - attacker.gridX) + Math.abs(p.gridY - attacker.gridY);
             if (dist <= FREEZE_RANGE && dist < minDist) {
                 minDist = dist;
-                target  = p;
+                target = p;
             }
         }
 
         attacker.hasWeapon = false;
         if (target != null) {
-            target.frozen      = true;
+            target.frozen = true;
             target.frozenUntil = System.currentTimeMillis() + FREEZE_DURATION_MS;
-            target.score       = Math.max(0, target.score - FREEZE_PENALTY);
+            target.score = Math.max(0, target.score - FREEZE_PENALTY);
             System.out.println("[Engine] " + attacker.name + " froze " + target.name);
         }
+    }
+
+    private void processEmote(PlayerAction action) {
+        Player p = findPlayer(action.playerId);
+        if (p == null || !p.connected)
+            return;
+        if (action.dx < 1 || action.dx > 4)
+            return;
+        // Set emote state
+        p.activeEmote = action.dx;
+        p.emoteStartTime = System.currentTimeMillis();
+        p.emoteEndTime = p.emoteStartTime + 1500; // 1.5 seconds
     }
 
     // ── Zone Logic ────────────────────────────────────────────────────────────
@@ -361,8 +412,8 @@ public class GameEngine {
                     } else if (now > z.graceTimerExpiry) {
                         // Grace timer expired → owner loses the zone
                         System.out.println("[Engine] Zone " + z.zoneId + " lost by " + z.ownerId + " (grace expired)");
-                        z.ownerId          = null;
-                        z.captureProgress  = 0f;
+                        z.ownerId = null;
+                        z.captureProgress = 0f;
                         z.graceTimerExpiry = -1;
                         zoneCapturer.remove(z.zoneId);
                     }
@@ -396,8 +447,8 @@ public class GameEngine {
                     if (z.captureProgress >= 1f) {
                         // Zone captured!
                         System.out.println("[Engine] Zone " + z.zoneId + " captured by " + p.name);
-                        z.ownerId          = p.playerId;
-                        z.captureProgress  = 1f;
+                        z.ownerId = p.playerId;
+                        z.captureProgress = 1f;
                         z.graceTimerExpiry = -1;
                         zoneCapturer.remove(z.zoneId);
                     }
@@ -405,12 +456,13 @@ public class GameEngine {
 
             } else {
                 // ── Two or more players in the zone → CONTESTED ────────────
-                z.contestedBy      = "CONTESTED";
+                z.contestedBy = "CONTESTED";
                 z.graceTimerExpiry = -1; // suspend grace timer while contested
 
                 // Check if owner is among those inside — if so cancel grace timer
                 boolean ownerPresent = inside.stream().anyMatch(p -> p.playerId.equals(z.ownerId));
-                if (ownerPresent) z.graceTimerExpiry = -1;
+                if (ownerPresent)
+                    z.graceTimerExpiry = -1;
 
                 // Capture progress stalls — do nothing
             }
@@ -426,9 +478,11 @@ public class GameEngine {
      */
     private void checkItemPickups() {
         for (Player p : gameState.players) {
-            if (!p.connected || p.frozen) continue;
+            if (!p.connected || p.frozen)
+                continue;
             for (Item item : gameState.items) {
-                if (item.collected) continue;
+                if (item.collected)
+                    continue;
                 if (item.gridX == p.gridX && item.gridY == p.gridY) {
                     collectItem(p, item);
                 }
@@ -469,10 +523,14 @@ public class GameEngine {
         }
     }
 
-    /** Awards passive zone points (+2) to each zone owner. Called every 10 ticks (1 sec). */
+    /**
+     * Awards passive zone points (+2) to each zone owner. Called every 10 ticks (1
+     * sec).
+     */
     private void awardZonePoints() {
         for (Zone z : gameState.zones) {
-            if (z.ownerId == null) continue;
+            if (z.ownerId == null)
+                continue;
             Player owner = findPlayer(z.ownerId);
             if (owner != null && owner.connected) {
                 owner.score += z.pointsPerSecond;
@@ -482,17 +540,19 @@ public class GameEngine {
 
     /** Decrements the game timer by 1 second. Called every 10 ticks. */
     private void decrementTimer() {
-        if (gameState.timeRemaining > 0) gameState.timeRemaining--;
+        if (gameState.timeRemaining > 0)
+            gameState.timeRemaining--;
     }
 
     // ── Item Spawning ─────────────────────────────────────────────────────────
 
     /** Attempts to spawn one random item at a free cell. */
     private void spawnItem() {
-        if (getActiveItemCount() >= MAX_ITEMS) return;
+        if (getActiveItemCount() >= MAX_ITEMS)
+            return;
 
         ItemType[] types = ItemType.values();
-        ItemType   type  = types[random.nextInt(types.length)];
+        ItemType type = types[random.nextInt(types.length)];
 
         // Try up to 50 random positions to find a free cell
         for (int attempt = 0; attempt < 50; attempt++) {
@@ -512,7 +572,10 @@ public class GameEngine {
         if (!gameState.players.isEmpty()) {
             boolean anyConnected = false;
             for (Player p : gameState.players) {
-                if (p.connected) { anyConnected = true; break; }
+                if (p.connected) {
+                    anyConnected = true;
+                    break;
+                }
             }
             if (!anyConnected) {
                 gameState.gameOver = true;
@@ -523,7 +586,8 @@ public class GameEngine {
             }
         }
 
-        if (gameState.timeRemaining > 0) return;
+        if (gameState.timeRemaining > 0)
+            return;
 
         gameState.gameOver = true;
         running = false;
@@ -546,7 +610,8 @@ public class GameEngine {
     /** Finds a player by ID. Returns null if not found. */
     public Player findPlayer(String playerId) {
         for (Player p : gameState.players) {
-            if (p.playerId.equals(playerId)) return p;
+            if (p.playerId.equals(playerId))
+                return p;
         }
         return null;
     }
@@ -555,9 +620,10 @@ public class GameEngine {
     private List<Player> playersInZone(Zone z) {
         List<Player> result = new ArrayList<>();
         for (Player p : gameState.players) {
-            if (!p.connected) continue;
+            if (!p.connected)
+                continue;
             if (p.gridX >= z.x && p.gridX < z.x + z.width &&
-                p.gridY >= z.y && p.gridY < z.y + z.height) {
+                    p.gridY >= z.y && p.gridY < z.y + z.height) {
                 result.add(p);
             }
         }
@@ -566,20 +632,24 @@ public class GameEngine {
 
     private int getActiveItemCount() {
         int count = 0;
-        for (Item item : gameState.items) if (!item.collected) count++;
+        for (Item item : gameState.items)
+            if (!item.collected)
+                count++;
         return count;
     }
 
     private boolean isCellFreeOfItems(int x, int y) {
         for (Item item : gameState.items) {
-            if (!item.collected && item.gridX == x && item.gridY == y) return false;
+            if (!item.collected && item.gridX == x && item.gridY == y)
+                return false;
         }
         return true;
     }
 
     private boolean isCellOccupiedByPlayer(int x, int y) {
         for (Player p : gameState.players) {
-            if (p.connected && p.gridX == x && p.gridY == y) return true;
+            if (p.connected && p.gridX == x && p.gridY == y)
+                return true;
         }
         return false;
     }

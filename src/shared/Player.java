@@ -14,10 +14,14 @@ public class Player implements Serializable {
     public long speedBoostUntil;
     public boolean hasWeapon;
     public boolean connected;
-    public int lastSeqNumber;
+    public int lastMoveSeq;
+    public int lastActionSeq;
+    public int activeEmote = 0;
+    public long emoteStartTime = 0;
+    public long emoteEndTime = 0;
 
-    public Player(String playerId, String name, 
-                  int gridX, int gridY, Color color) {
+    public Player(String playerId, String name,
+            int gridX, int gridY, Color color) {
         this.playerId = playerId;
         this.name = name;
         this.gridX = gridX;
@@ -27,6 +31,7 @@ public class Player implements Serializable {
         this.frozen = false;
         this.hasWeapon = false;
         this.connected = true;
-        this.lastSeqNumber = -1;
+        this.lastMoveSeq = -1;
+        this.lastActionSeq = -1;
     }
 }
