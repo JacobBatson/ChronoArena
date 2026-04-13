@@ -1,6 +1,6 @@
 # ChronoArena
 
-A real-time multiplayer arena game built in Java. Up to 4 players compete on a grid-based map, capturing zones and collecting items to earn the highest score before time runs out.
+A real-time multiplayer arena game built in Java. Players compete on a grid-based map, capturing zones and collecting items to earn the highest score before time runs out.
 
 **Team Members:** Jacob Batson, Kaab Dawit, Ben Delton, Thomas Mitropoulos
 
@@ -27,13 +27,24 @@ java -cp out client.ClientMain
 ```
 - Enter the server's IP address when prompted
 - Enter your player name
-- Up to 4 players can connect
 
 All players must be on the same network. Find the server's IP with:
 ```bash
 ipconfig getifaddr en0   # macOS
 ipconfig                 # Windows
 ```
+
+---
+
+## Lobby
+
+When the server starts, a lobby window opens before the game begins.
+
+- Players connect and their names appear in the lobby list automatically
+- The server operator chooses the game duration (1–10 minutes) using the spinner
+- Once at least one player is connected, the **Start Game** button becomes active
+- Clicking **Start Game** starts the countdown and switches the server window to the live game view
+- Players who connect after the game starts will still join mid-game
 
 ---
 
@@ -48,7 +59,7 @@ ipconfig                 # Windows
 
 ## Game Rules
 
-**Goal:** Have the highest score when the timer runs out.
+**Goal:** Have the highest score when the timer runs out. Game duration is set by the server operator in the lobby (1–10 minutes).
 
 ### Scoring
 | Action | Points |
@@ -129,8 +140,9 @@ Edit `config.properties` to change server settings:
 server.ip=localhost
 server.tcp.port=12345
 server.udp.port=12346
-game.duration=150
 ```
+
+> **Note:** Game duration is not set here — it is chosen by the server operator in the lobby before the game starts (1–10 minutes).
 
 ---
 
@@ -140,4 +152,4 @@ While the server is running, type into the server terminal:
 ```
 kill <playerId> [reason]
 ```
-Example: `kill player1 AFK` — forcibly disconnects that player.
+Example: `kill p1 AFK` — forcibly disconnects that player. Player IDs are assigned in join order: `p1`, `p2`, `p3`, etc.
