@@ -43,6 +43,8 @@ ipconfig                 # Windows
 |-----|--------|
 | WASD or Arrow Keys | Move |
 | SPACE | Fire Freeze Ray (if you have it) |
+| T | Open Chat |
+| Y | | Whisper / Direct Message |
 
 ---
 
